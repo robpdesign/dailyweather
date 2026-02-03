@@ -1,6 +1,6 @@
 import os
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 # Configuration from environment variables
@@ -126,23 +126,35 @@ def send_telegram_message(message):
     response = requests.post(url, json=payload)
     return response.json()
 
+def write_github_output(key, value):
+    """Write output variable for GitHub Actions"""
+    github_output = os.environ.get('GITHUB_OUTPUT', '')
+    if github_output:
+        with open(github_output, 'a') as f:
+            f.write(f"{key}={value}\n")
+
 def main():
     try:
-        # Check if it's actually around 7:30am in Sydney
-        # (Workflow runs at both possible UTC times, only one is correct)
         sydney_tz = pytz.timezone('Australia/Sydney')
         sydney_now = datetime.now(sydney_tz)
         current_hour = sydney_now.hour
+        sydney_minute = sydney_now.minute
+        sydney_date = sydney_now.strftime('%Y-%m-%d')
         
-        # Allow manual triggers anytime, but scheduled runs only between 7-8am
+        # Allow manual triggers anytime, but scheduled runs only in morning window
         is_manual = os.environ.get('MANUAL_TRIGGER', 'false').lower() == 'true'
         
-        sydney_minute = sydney_now.minute
         # Allow 7:00am - 8:30am window to catch either cron trigger
         in_window = (current_hour == 7) or (current_hour == 8 and sydney_minute <= 30)
         
         if not is_manual and not in_window:
             print(f"⏭️ Skipping - Sydney time is {sydney_now.strftime('%I:%M %p')}, outside 7:00-8:30am window")
+            return
+        
+        # Check if already sent today (via cache from earlier run)
+        last_sent_date = os.environ.get('LAST_SENT_DATE', '')
+        if not is_manual and last_sent_date == sydney_date:
+            print(f"⏭️ Skipping - Already sent weather for {sydney_date}")
             return
         
         print(f"🕐 Sydney time: {sydney_now.strftime('%I:%M %p %Z')}")
@@ -161,6 +173,8 @@ def main():
         
         if result.get('ok'):
             print("✅ Weather update sent successfully!")
+            # Output date for caching
+            write_github_output('sent_date', sydney_date)
         else:
             print(f"❌ Failed to send message: {result}")
             
@@ -172,3 +186,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
